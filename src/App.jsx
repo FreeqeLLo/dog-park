@@ -87,9 +87,21 @@ const cleanText = (t) => {
 // ---------------- Ana Uygulama ----------------
 export default function DogParkApp() {
   const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-  const parkFromUrl = urlParams.get("park") || "siracevizler";
+const parkFromUrl = urlParams.get("park") || "siracevizler";
 
-  const [park] = useState(parkFromUrl); // park seçimi kilitli, değiştirilemez
+// Cookie'de park varsa URL'yi ezer → park kilidi
+const cookiePark = (() => {
+  try {
+    const got = getCookie(COOKIE_KEY);
+    if (!got) return null;
+    const data = JSON.parse(decodeURIComponent(got));
+    return data?.park || null;
+  } catch { return null; }
+})();
+const initialPark = cookiePark || parkFromUrl;
+
+const [park] = useState(initialPark); // park kilitli, değiştirilemez
+
   const [dogName, setDogName] = useState("");
   const [joined, setJoined] = useState(false);
   const [members, setMembers] = useState([]);
@@ -268,7 +280,7 @@ export default function DogParkApp() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-100 to-pink-100 text-slate-800">
       <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-white/40 bg-white/60 border-b border-white/50">
-        <div className="mx-auto max-w-4xl px-4 py-3 flex items-center justify-between">
+<div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-2xl">🐾</span>
             <div>
@@ -282,7 +294,7 @@ export default function DogParkApp() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-8">
+<main className="px-4 md:px-8 py-8">
         {!joined ? (
           <JoinCard
             dogName={dogName}
@@ -322,7 +334,7 @@ export default function DogParkApp() {
         <SelfTestPanel storageKeyMembers={keyMembers} storageKeyRecent={keyRecent} storageKeyProfiles={keyProfiles} keyChat={keyChat} hasBC={hasBroadcast()} />
       </main>
 
-      <footer className="mx-auto max-w-4xl px-4 pb-10 pt-4 text-center text-xs opacity-70">
+<footer className="px-4 md:px-8 pb-10 pt-4 text-center text-xs opacity-70">
         <p>Demo: Aynı parkta farklı sekmeler açarak anlık görüntülemeyi test edebilirsin. Gerçek kullanım için Realtime servis bağlayın.</p>
       </footer>
     </div>
