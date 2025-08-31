@@ -9,38 +9,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 // - Sohbet: köpek adıyla yazılır; küfürler maske; kullanıcı yalnız kendi mesajını silebilir
 // - Park izolasyonu: siracevizler / sisli / nisantasi
 // - KVKK onayı + aydınlatma
-// - Park kilidi: ilk giriş yapılan park cookie'de saklanır, URL'i ezer → park değişmez
-// - İsteğe bağlı (flag): Firebase Realtime'a profil/sohbet kalıcı yazımı (window.firebaseEnabled)
+// - Park kilidi: ilk park cookie'de saklanır, URL'i ezer → park değişmez
+// - (Faz 2'de eklenecek) Firebase Realtime kalıcılık
 
 // ---------------- Yardımcılar ----------------
-let __fb = null; // opsiyonel Firebase handle
-async function fbInit() {
-  try {
-    if (typeof window === "undefined" || !window.firebaseEnabled) return null;
-    if (__fb) return __fb;
-    const [{ initializeApp }, { getDatabase, ref, set, onValue, push, remove }, { getAuth, signInAnonymously }] = await Promise.all([
-      import("firebase/app"),
-      import("firebase/database"),
-      import("firebase/auth"),
-    ]);
-    const cfg = window.firebaseConfig || null;
-    if (!cfg || !cfg.apiKey || !cfg.databaseURL) {
-      console.warn("Firebase config eksik. window.firebaseConfig ayarlayın veya window.firebaseEnabled=false yapın.");
-      return null;
-    }
-    const app = initializeApp(cfg);
-    const auth = getAuth(app);
-    if (!auth.currentUser) await signInAnonymously(auth);
-    const db = getDatabase(app);
-    __fb = { app, auth, db, ref, set, onValue, push, remove };
-    return __fb;
-  } catch (e) {
-    console.warn("Firebase init hatası:", e);
-    return null;
-  }
-}
-const useFirebase = () => typeof window !== "undefined" && !!window.firebaseEnabled;
-
 const safeUUID = () => {
   try { if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID(); } catch {}
   return "id-" + Math.random().toString(36).slice(2);
@@ -99,7 +71,7 @@ export default function DogParkApp() {
   const [kvkkOk, setKvkkOk] = useState(false);
 
   // Profil modal
-  const [editId, setEditId] = useState(null);
+  const [editId, setEditId] = useState(null); // null | string
 
   const presenceRef = useRef(null);
   useEffect(() => {
@@ -238,14 +210,6 @@ export default function DogParkApp() {
     map[id] = { ...(map[id] || {}), ...patch };
     saveProfiles(map);
     announce("profile", { id });
-    (async () => {
-      try {
-        if (!useFirebase()) return;
-        const fb = await fbInit(); if (!fb) return;
-        const r = fb.ref(fb.db, `profiles/${park}/${id}`);
-        await fb.set(r, map[id]);
-      } catch (e) { console.warn("Profil Firebase yazılamadı", e); }
-    })();
   };
 
   const onlineNow = useMemo(() => {
@@ -282,21 +246,48 @@ export default function DogParkApp() {
 
       <main className="px-4 md:px-8 py-8">
         {!joined ? (
-          <form onSubmit={handleJoin} className="max-w-md mx-auto bg-white rounded-xl shadow p-4 space-y-3">
-            <input
-              type="text"
-              value={dogName}
-              onChange={(e) => setDogName(e.target.value)}
-              placeholder="Köpeğinin adı"
-              className="w-full border rounded px-3 py-2"
-            />
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={kvkkOk} onChange={(e) => setKvkkOk(e.target.checked)} />
-              KVKK metnini okudum ve kabul ediyorum
-            </label>
-            <button type="submit" className="w-full bg-emerald-500 text-white rounded py-2">Parka Katıl</button>
-            <p className="text-[11px] opacity-70">Hızlı not: Profilinizi katıldıktan sonra "Profili düzenle" ile güncelleyebilirsiniz. Küfür ve saygısız mesajlar maskelenir.</p>
-          </form>
+          <> 
+            <section className="grid md:grid-cols-2 gap-4 mb-6">
+              <form onSubmit={handleJoin} className="bg-white rounded-2xl shadow p-4 space-y-3">
+                <h2 className="font-semibold">Parkta mısın?</h2>
+                <p className="text-sm opacity-70">QR seni buraya getirdiyse, köpeğinin adını yaz ve katıl.</p>
+                <input
+                  type="text"
+                  value={dogName}
+                  onChange={(e) => setDogName(e.target.value)}
+                  placeholder="Örn. Zeytin"
+                  className="w-full border rounded px-3 py-2"
+                />
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={kvkkOk} onChange={(e) => setKvkkOk(e.target.checked)} />
+                  KVKK Aydınlatma Metni'ni okudum ve verilerin işlenmesine onay veriyorum.
+                </label>
+                <div className="text-xs opacity-70">Park: {park}</div>
+                <button type="submit" disabled={!dogName.trim() || !kvkkOk} className="w-full bg-emerald-600 text-white rounded py-2 disabled:opacity-40 disabled:cursor-not-allowed">Parka Katıl</button>
+              </form>
+
+              <div className="rounded-2xl bg-white/70 p-4 shadow">
+                <h3 className="font-semibold mb-2">Hızlı Not</h3>
+                <ul className="list-disc pl-5 text-sm space-y-1">
+                  <li>Online listesi son 30 saniyeye göre hesaplanır.</li>
+                  <li>"Ayrıl" veya sekmeyi kapatınca anında düşersin; isim son 30 dk bölümünde görünür.</li>
+                  <li>İsimler benzersiz olmak zorunda değildir.</li>
+                  <li>Profilini dilediğin zaman güncelleyebilirsin.</li>
+                  <li>Park içi sohbet saygı amaçlıdır; küfür/argo maskelenir.</li>
+                </ul>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white/70 p-4 shadow mb-6">
+              <h3 className="font-semibold mb-2">Nasıl çalışır?</h3>
+              <ol className="list-decimal pl-5 text-sm space-y-1">
+                <li>QR seni <code>?park=&lt;slug&gt;</code> ile bu sayfaya getirir (siracevizler, sisli, nisantasi).</li>
+                <li>İlk katılımda KVKK onayı ve isim yeterlidir; sonraki girişlerde cookie ile otomatik online olursun.</li>
+                <li>"Ayrıl" dersen veya sekmeyi kapatırsan anında listeden düşersin; isim 30 dk görünür.</li>
+                <li>Profil kartından cins/yaş/cinsiyet/foto ekleyebilirsin; sohbette yanına yansır.</li>
+              </ol>
+            </section>
+          </>
         ) : (
           <>
             <ParkBoard
@@ -318,33 +309,31 @@ export default function DogParkApp() {
               keyChat={keyChat}
               myId={tabId}
               park={park}
-              useFirebase={useFirebase()}
             />
 
             <ProfileModal
               open={!!editId}
-              onClose={()=>setEditId(null)}
+              onClose={() => setEditId(null)}
               id={editId}
               meId={tabId}
-              data={profiles[editId || ""] || {}}
-              onSave={(patch)=>{ if(!editId) return; updateProfile(editId, patch); setEditId(null); }}
+              data={editId ? (profiles[editId] || {}) : {}}
+              onSave={(patch) => { if (!editId) return; updateProfile(editId, patch); setEditId(null); }}
             />
           </>
         )}
 
         <KvkkCard />
-        <SelfTestPanel storageKeyMembers={keyMembers} storageKeyRecent={keyRecent} storageKeyProfiles={keyProfiles} keyChat={keyChat} hasBC={hasBroadcast()} />
       </main>
 
       <footer className="px-4 md:px-8 pb-10 pt-4 text-center text-xs opacity-70">
-        <p>Demo: Aynı parkta farklı sekmeler açarak anlık görüntülemeyi test edebilirsin. İsteğe bağlı olarak Firebase Realtime ile kalıcı kayıt yapılabilir.</p>
+        <p>Demo: Aynı parkta farklı sekmeler açarak anlık görüntülemeyi test edebilirsin. Firebase Realtime kalıcılık faz 2'de eklenecek.</p>
       </footer>
     </div>
   );
 }
 
 // ---------------- Alt Bileşenler ----------------
-function ParkBoard({ members, recent, profiles, myId, dogName, onLeave, onRename, onEdit, park }) {
+function ParkBoard({ members, recent, profiles, myId, dogName, onLeave, onRename, onEdit }) {
   return (
     <section className="grid md:grid-cols-2 gap-4 mb-6">
       <div className="rounded-2xl bg-white/80 p-4 shadow">
@@ -424,24 +413,12 @@ function ProfileModal({ open, onClose, id, meId, data, onSave }) {
   );
 }
 
-function ChatPanel({ dogName, loadChat, saveChat, keyChat, myId, park, useFirebase }) {
+function ChatPanel({ dogName, loadChat, saveChat, keyChat, myId, park }) {
   const [msgs, setMsgs] = useState([]);
   const [text, setText] = useState("");
   const bcRef = useRef(null);
 
   useEffect(()=>{
-    if (useFirebase) {
-      (async () => {
-        const fb = await fbInit(); if (!fb) return;
-        const r = fb.ref(fb.db, `chat/${park}`);
-        fb.onValue(r, (snap) => {
-          const obj = snap.val() || {};
-          const arr = Object.values(obj).sort((a,b)=> (a.at||0)-(b.at||0));
-          setMsgs(arr);
-        });
-      })();
-      return;
-    }
     // local
     setMsgs(loadChat());
     const onStorage = (e) => { if (e.key === keyChat) setMsgs(loadChat()); };
@@ -454,39 +431,21 @@ function ChatPanel({ dogName, loadChat, saveChat, keyChat, myId, park, useFireba
       return () => { try { bc.removeEventListener("message", onMsg); bc.close(); } catch {}; window.removeEventListener("storage", onStorage); };
     }
     return () => window.removeEventListener("storage", onStorage);
-  }, [keyChat, park, useFirebase]);
+  }, [keyChat]);
 
   const send = (e) => {
     e?.preventDefault?.();
     const raw = text.trim(); if (!raw) return;
-    const cleaned = cleanText(raw);
-    if (useFirebase) {
-      (async () => {
-        const fb = await fbInit(); if (!fb) return;
-        const r = fb.ref(fb.db, `chat/${park}`);
-        const keyRef = fb.push(r);
-        await fb.set(keyRef, { id: keyRef.key, ownerId: myId, name: dogName, text: cleaned, at: Date.now() });
-        setText("");
-      })();
-      return;
-    }
-    const msg = { id: safeUUID(), ownerId: myId, name: dogName, text: cleaned, at: Date.now() };
+    const msg = { id: safeUUID(), ownerId: myId, name: dogName, text: cleanText(raw), at: Date.now() };
     const next = [...loadChat(), msg];
     saveChat(next); setMsgs(next); setText("");
     try { bcRef.current?.postMessage({ type: "chat:new" }); } catch {}
   };
 
   const delMsg = (id) => {
-    const target = msgs.find(m => m.id === id);
-    if (!target || target.ownerId !== myId) return; // sadece kendi mesajı
-    if (useFirebase) {
-      (async () => {
-        const fb = await fbInit(); if (!fb) return;
-        await fb.remove(fb.ref(fb.db, `chat/${park}/${id}`));
-      })();
-      return;
-    }
     const list = loadChat();
+    const target = list.find(m => m.id === id);
+    if (!target || target.ownerId !== myId) return; // sadece kendi mesajı
     const next = list.filter(m => m.id !== id);
     saveChat(next); setMsgs(next);
     try { bcRef.current?.postMessage({ type: "chat:delete", id }); } catch {}
@@ -522,22 +481,17 @@ function KvkkCard() {
   return (
     <section className="rounded-2xl bg-white/60 p-4 mt-6 text-xs">
       <h3 className="font-semibold mb-1">KVKK Aydınlatma Özeti</h3>
-      <p>Bu uygulama; köpek adı, profil bilgileri (cins, yaş, cinsiyet, foto URL), park ve sohbet içeriklerini park içi iletişim amacıyla işler. Profil ve sohbet verileri isteğe bağlı olarak Firebase üzerinde saklanabilir. Talep halinde silme için iletişim alanından ulaşabilirsiniz.</p>
+      <p>Bu uygulama; köpek adı, profil bilgileri (cins, yaş, cinsiyet, foto URL), park ve sohbet içeriklerini park içi iletişim amacıyla işler. Veriler tarayıcıda saklanır; ileride isteğe bağlı olarak Firebase üzerinde de saklanabilir. Talep halinde silme/güncelleme için iletişim alanından ulaşabilirsiniz.</p>
     </section>
   );
 }
 
-function SelfTestPanel({ storageKeyMembers, storageKeyRecent, storageKeyProfiles, keyChat, hasBC }) {
-  return (
-    <details className="mt-6 text-xs">
-      <summary className="cursor-pointer select-none">Runtime Test Paneli</summary>
-      <div className="grid md:grid-cols-2 gap-3 mt-3">
-        <div className="rounded border p-2"><b>members</b><pre className="whitespace-pre-wrap text-[11px]">{localStorage.getItem(storageKeyMembers)}</pre></div>
-        <div className="rounded border p-2"><b>recent</b><pre className="whitespace-pre-wrap text-[11px]">{localStorage.getItem(storageKeyRecent)}</pre></div>
-        <div className="rounded border p-2"><b>profiles</b><pre className="whitespace-pre-wrap text-[11px]">{localStorage.getItem(storageKeyProfiles)}</pre></div>
-        <div className="rounded border p-2"><b>chat</b><pre className="whitespace-pre-wrap text-[11px]">{localStorage.getItem(keyChat)}</pre></div>
-      </div>
-      <div className="mt-2">BroadcastChannel: {String(hasBC)}</div>
-    </details>
-  );
+// ---------------- Mini Smoke Testler (dev yardımcısı) ----------------
+if (typeof window !== "undefined" && !window.__dogpark_smoke__) {
+  window.__dogpark_smoke__ = true;
+  try {
+    console.assert(cleanText("amk test") !== "amk test", "Küfür filtresi çalışmalı");
+    const cutoff = Date.now() - MIN_MS_ONLINE;
+    console.assert(typeof cutoff === "number", "Zaman hesapları sayısal olmalı");
+  } catch {}
 }
